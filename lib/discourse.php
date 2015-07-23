@@ -11,6 +11,10 @@ class Discourse {
     return str_replace( "{size}", $size, $template );
   }
 
+  // static variables to hold names of meta data and form post data
+  static $post_meta_publish_category_name = "discourse_publish_category";
+  static $post_form_publish_category_name = "discourse[publish-category]";
+
   // Version
   static $version ='0.6.5';
 
@@ -328,7 +332,6 @@ class Discourse {
       // widget it updates the field as it should.
 
       add_post_meta( $post->ID, 'publish_to_discourse', '1', true );
-
       self::sync_to_discourse( $post->ID, $post->post_title, $post->post_content );
     }
   }
@@ -371,6 +374,10 @@ class Discourse {
   }
 
   function save_postdata( $postid ) {
+
+    // load the options
+    $options = self::get_plugin_options();
+
     if ( ! current_user_can( 'edit_page', $postid ) ) {
       return $postid;
     }
@@ -389,6 +396,43 @@ class Discourse {
     }
 
     add_post_meta( $_POST['ID'], 'publish_to_discourse', self::publish_active() ? '1' : '0', true );
+
+    // see if there is a publish category.
+    $publish_category = "";
+    $meta_publish_category = get_post_meta( $_POST[ 'ID' ], self::$post_meta_publish_category_name, true );
+    
+    // check if 'publish-category' is in post data.
+    $discourse_post_data = $_POST[ 'discourse' ];
+    if ( isset( $discourse_post_data[ 'publish-category' ] ) ) {
+
+      // there is.  Empty?
+      $publish_category = $discourse_post_data[ 'publish-category' ];
+      if ( $publish_category == "" ){
+
+        // insert, or update?
+        if( $_POST['action'] == 'editpost' ) {
+
+          // update, so if empty, get default.
+          $publish_category = $options[ 'publish-category' ];
+
+        } else {
+
+          // insert (or other).  Is there already something in meta?
+          if ( empty( $meta_publish_category ) == false ) {
+
+            // something in meta.  Use that.
+            $publish_category = $meta_publish_category;
+
+          } //-- END check to see if there is a meta value --//
+
+        } //-- END check to see if update or insert. --//
+
+      } //-- END check to see if category from $_POST is empty. --//
+
+    } //-- end check to see if value in $_POST --//
+
+    // add the category to the meta data.
+    update_post_meta( $_POST[ 'ID' ], self::$post_meta_publish_category_name, $publish_category ); 
 
     return $postid;
   }
@@ -437,16 +481,43 @@ class Discourse {
       $username = $options['publish-username'];
     }
 
-    $category = $options['publish-category'];
-    if ( $category === '' ) {
-      $categories = get_the_category();
-      foreach ( $categories as $category ) {
-        if ( in_category( $category->name, $postid ) ) {
-          $category = $category->name;
-          break;
+    // category in meta-data?
+    $category = get_post_meta( $postid, self::$post_meta_publish_category_name, true );
+    // add_post_meta( $postid, 'debug_discourse_category_meta', $category, true );
+    if ( ( $category === NULL ) || ( empty( $category ) ) ) {
+      
+      // no - try to pull from $_POST.
+      $discourse_post_data = $_POST[ 'discourse' ];
+      $category = $discourse_post_data[ 'publish-category' ];
+      // add_post_meta( $postid, 'debug_discourse_category_post', $category, true );
+
+    }
+
+    // got a category yet?
+    if ( ( $category === NULL ) || ( empty( $category ) ) ) {
+
+      // no category passed in.  Look for one.
+      $category = $options['publish-category'];
+      if ( $category === '' ) {
+        $categories = get_the_category();
+        foreach ( $categories as $category ) {
+          if ( in_category( $category->name, $postid ) ) {
+            $category = $category->name;
+            break;
+          }
         }
       }
-    }
+
+      // finally, if we have one now, add it to the post's meta.
+      if ( ( is_null( $category ) == false ) && ( empty( $category ) == false ) ) {
+
+        add_post_meta( $postid, self::$post_meta_publish_category_name, $category, true );
+
+      }
+
+    } //-- END checks to see if category --//
+
+    add_post_meta( $postid, 'debug_discourse_category_OUT', $category, true );
 
     $data = array(
       'wp-id' => $postid,
@@ -481,6 +552,13 @@ class Discourse {
       if( isset( $discourse_id ) && $discourse_id > 0 ) {
         add_post_meta( $postid, 'discourse_post_id', $discourse_id, true );
       }
+      
+      // may have $json->errors with list of errors
+      if( isset( $json->errors ) ) {
+        // errors - store to a meta tag for debugging.
+        add_post_meta( $postid, 'discourse_api_errors', implode( ',', $json->errors ), true );
+      }
+
     } else {
       // for now the updates are just causing grief, leave'em out
       return;

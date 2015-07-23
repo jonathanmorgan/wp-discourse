@@ -39,6 +39,7 @@ class DiscourseAdmin {
     add_settings_field( 'discourse_auto_publish', 'Auto Publish', array( $this, 'auto_publish_checkbox' ), 'discourse', 'discourse_wp_publish' );
     add_settings_field( 'discourse_auto_track', 'Auto Track Published Topics', array( $this, 'auto_track_checkbox' ), 'discourse', 'discourse_wp_publish' );
     add_settings_field( 'discourse_allowed_post_types', 'Post Types to publish to Discourse', array( $this, 'post_types_select' ), 'discourse', 'discourse_wp_publish' );
+    add_settings_field( 'discourse_display_publish_category', 'Display Publish Category Select', array( $this, 'display_publish_category_checkbox' ), 'discourse', 'discourse_wp_publish' );
 
     add_settings_field( 'discourse_use_discourse_comments', 'Use Discourse Comments', array( $this, 'use_discourse_comments_checkbox' ), 'discourse', 'discourse_comments' );
     add_settings_field( 'discourse_max_comments', 'Max visible comments', array( $this, 'max_comments_input' ), 'discourse', 'discourse_comments' );
@@ -111,6 +112,10 @@ class DiscourseAdmin {
 
   function post_types_select() {
     self::post_type_select_input( 'allowed_post_types', get_post_types() );
+  }
+
+  function display_publish_category_checkbox() {
+    self::checkbox_input( 'display-publish-category', '(In "Post Types to publish to Discourse", display category selector as well)' );
   }
 
   function use_discourse_comments_checkbox() {
@@ -202,7 +207,7 @@ class DiscourseAdmin {
   }
 
 
-  function category_select( $option, $description ) {
+  function category_select( $option, $description, $selected = NULL, $empty_option_label = NULL ) {
     $options = get_option( 'discourse' );
     $url = $options['url'] . '/categories.json';
 
@@ -234,10 +239,22 @@ class DiscourseAdmin {
     }
 
     $categories = $remote['category_list']['categories'];
-    $selected = isset( $options['publish-category'] ) ? $options['publish-category'] : '';
+
+    // selected passed in?
+    if ( $selected === NULL ) {
+
+      // no - use the default.
+      $selected = isset( $options['publish-category'] ) ? $options['publish-category'] : '';
+
+    }
 
     echo "<select id='discourse[{$option}]' name='discourse[{$option}]'>";
-    echo '<option></option>';
+    if ( is_null( $empty_option_label ) == false ) {
+      // output option label.
+      echo '<option value="">' . $empty_option_label . '</option>';
+    } else {
+      echo '<option></option>';
+    }
 
     foreach( $categories as $category ){
       printf( '<option value="%s"%s>%s</option>',
@@ -315,6 +332,7 @@ class DiscourseAdmin {
     global $post;
 
     $options = Discourse::get_plugin_options();
+    $display_category_select = False;
 
     if( in_array( $post->post_type, $options['allowed_post_types'] ) ) {
       if( $post->post_status == 'auto-draft' ) {
@@ -326,8 +344,24 @@ class DiscourseAdmin {
       echo '<div class="misc-pub-section misc-pub-section-last">
            <span>'
            . '<input type="hidden" name="showed_publish_option" value="1">'
-           . '<label><input type="checkbox"' . (( $value == "1") ? ' checked="checked" ' : null) . 'value="1" name="publish_to_discourse" /> Publish to Discourse</label>'
-      .'</span></div>';
+           . '<label><input type="checkbox"' . (( $value == "1") ? ' checked="checked" ' : null) . 'value="1" name="publish_to_discourse" /> Publish to Discourse</label>';
+      
+      // do we display category select?
+      $display_category_select = ( bool ) $options[ 'display-publish-category' ];
+      echo '<!-- display-publish-category = ' . $display_category_select . '  -->';
+      if ( $display_category_select == TRUE )
+      {
+        // yes.  Retrieve the category.
+        $selected_category = get_post_meta( $post->ID, Discourse::$post_meta_publish_category_name, true );
+        echo '<!-- selected_category = ' . $selected_category . ' -->';
+
+        // output HTML
+        echo '<p>Discourse category:<br />';
+        self::category_select( 'publish-category', 'Category post will be published in Discourse (optional)', $selected_category, 'Default Category' );
+        echo '</p>';
+      }
+
+      echo '</span></div>';
     }
   }
 }
